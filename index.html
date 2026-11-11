@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Plant Map Walkthrough</title>
+<style>
+/* Layout: full-bleed 3D canvas, one collapsible control panel floating top-left, start screen picks detail level. Single dark look. */
+:root{
+  --bg:#0b0d10; --panel:rgba(18,22,28,.9); --line:#2c333d; --fg:#e8ecf1; --muted:#9aa4b1; --accent:#4f9cf0; --accent-ink:#06121f;
+  --ui:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:ui-monospace,Menlo,Consolas,monospace; color-scheme:dark;
+}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--fg);font:14px/1.4 var(--ui)}
+canvas{display:block;touch-action:none}
+#panel{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:calc(12px + env(safe-area-inset-left,0px));
+  width:min(320px,calc(100vw - 24px));max-height:calc(100% - 24px);overflow:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:12px;box-sizing:border-box;backdrop-filter:blur(6px);display:flex;flex-direction:column;gap:10px}
+#panel header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+h1{font-size:15px;margin:0;font-weight:600;text-wrap:balance}
+.sub{font:11px var(--mono);color:var(--muted)}
+#panel.min .body{display:none}
+.body{display:flex;flex-direction:column;gap:10px}
+.seg{display:flex;gap:4px;flex-wrap:wrap}
+button,a.btn{font:13px var(--ui);background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;text-decoration:none}
+button:hover,a.btn:hover{border-color:var(--muted)}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.ctl{display:flex;flex-direction:column;gap:3px}
+.ctl label{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.ctl label span{font-family:var(--mono);color:var(--fg);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+#help{font-size:12px;color:var(--muted);line-height:1.5;margin:0}
+kbd{font:11px var(--mono);border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--fg)}
+#cross{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px;pointer-events:none}
+#cross::before,#cross::after{content:"";position:absolute;background:var(--fg);opacity:.75}
+#cross::before{left:7px;top:0;width:2px;height:16px}#cross::after{top:7px;left:0;height:2px;width:16px}
+#hint{position:absolute;left:0;right:0;bottom:calc(20px + env(safe-area-inset-bottom,0px));text-align:center;pointer-events:none;font-size:15px;text-shadow:0 1px 4px #000;padding:0 16px}
+#start{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:5;padding:16px}
+#start .box{max-width:520px;display:flex;flex-direction:column;gap:14px}
+#start h2{margin:0;font-size:22px;font-weight:600}
+#start p{margin:0;color:var(--muted)}
+.choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.choice{display:flex;flex-direction:column;gap:4px;text-align:left;padding:14px;border-radius:10px}
+.choice b{font-size:15px}.choice span{color:var(--muted);font-size:12px}
+.choice:first-child{border-color:var(--accent)}
+.bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+#loadtxt{font:12px var(--mono);color:var(--muted)}
+#pad{position:absolute;right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(3,52px);gap:6px}
+#pad button{height:52px;padding:0;font-size:18px;background:var(--panel)}
+#pad .sp{visibility:hidden}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style></head><body>
+
+<div id="start"><div class="box">
+  <h2>Plant Map Walkthrough</h2>
+  <p>RTAB-Map scan from 23 Jul 2026. Choose how much detail to load.</p>
+  <div class="choices" id="choices">
+    <button class="choice" data-q="dense"><b>Full detail</b><span>10.1 M points from every full-resolution RGB-D frame · about 97 MB</span></button>
+    <button class="choice" data-q="lite"><b>Fast</b><span>1.7 M points · about 16 MB · better for phones and slow links</span></button>
+  </div>
+  <div id="prog" hidden><div class="bar"><i id="progbar"></i></div><div id="loadtxt"></div></div>
+  <p style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn" href="tour/">Open the 3D photo tour instead</a><a class="btn" href="swab/">Swab spot planner (segmentation + robot mission)</a></p>
+</div></div>
+
+<div id="panel" hidden>
+  <header><div><h1>Plant Map Walkthrough</h1><div class="sub" id="sub"></div></div><button id="min" aria-label="Collapse panel">–</button></header>
+  <div class="body">
+    <div class="seg" role="group" aria-label="View mode"><button data-m="fpv">Walk (FPV)</button><button data-m="360">360° look</button><button data-m="orbit">Overview</button></div>
+    <div class="seg" role="group" aria-label="Show"><button data-s="cloud">Point cloud</button><button data-s="mesh">Mesh</button><button data-s="both">Both</button></div>
+    <div class="ctl"><label for="pose">Start on robot route <span id="pl"></span></label><input id="pose" type="range" min="0" value="0"></div>
+    <div class="ctl"><label for="h">Eye height above floor <span id="hl"></span></label><input id="h" type="range" min="0.3" max="3" step="0.05" value="1.1"></div>
+    <div class="ctl"><label for="v">Walk speed <span id="vl"></span></label><input id="v" type="range" min="0.3" max="5" step="0.1" value="1.2"></div>
+    <div class="ctl"><label for="size">Point size <span id="sl"></span></label><input id="size" type="range" min="0.5" max="3" step="0.1" value="1.3"></div>
+    <div class="ctl"><label for="fov">Field of view <span id="fl"></span></label><input id="fov" type="range" min="40" max="110" step="1" value="70"></div>
+    <div class="seg"><button id="bg">White background</button><a class="btn" href="tour/">3D photo tour</a><a class="btn" href="swab/">Swab planner</a></div>
+    <p id="help"><b>Walk:</b> click the view to capture the mouse (or drag to look). <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move, <kbd>Space</kbd>/<kbd>E</kbd> up, <kbd>C</kbd>/<kbd>Q</kbd> down, <kbd>Shift</kbd> run, <kbd>Esc</kbd> release.<br>
+    <b>360°:</b> drag to look around in place. <b>Overview:</b> drag to orbit, scroll to zoom, right-drag to pan. <kbd>H</kbd> hides this panel.</p>
+  </div>
+</div>
+<div id="cross" hidden></div><div id="hint"></div>
+<div id="pad" hidden>
+  <span class="sp"></span><button data-k="KeyW" aria-label="Forward">▲</button><button data-k="KeyE" aria-label="Up">⤒</button>
+  <button data-k="KeyA" aria-label="Left">◀</button><button data-k="KeyS" aria-label="Back">▼</button><button data-k="KeyD" aria-label="Right">▶</button>
+</div>
+
+<script type="importmap">{"imports":{"three":"./lib/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from './lib/OrbitControls.js';
+const $=id=>document.getElementById(id);
+
+async function fetchBin(url,onBytes){
+  const res=await fetch(url); if(!res.ok) throw new Error(url+' '+res.status);
+  const reader=res.body?.getReader?.();
+  if(!reader){const b=await res.arrayBuffer(); onBytes(b.byteLength); return b;}
+  const chunks=[]; let got=0;
+  for(;;){const {done,value}=await reader.read(); if(done)break; chunks.push(value); got+=value.length; onBytes(value.length);}
+  const out=new Uint8Array(got); let o=0; for(const c of chunks){out.set(c,o);o+=c.length;} return out.buffer;
+}
+const q=await new Promise(res=>document.querySelectorAll('#choices button').forEach(b=>b.onclick=()=>res(b.dataset.q)));
+$('choices').hidden=true; $('prog').hidden=false;
+
+const LITE=await (await fetch('data/meta.json')).json();
+const CL = q==='dense' ? await (await fetch('data_dense/meta.json')).json() : LITE;
+const expected=CL.cloud.reduce((s,c)=>s+c.bytes,0)+LITE.mesh.bytes; let loaded=0;
+const tick=n=>{loaded+=n; $('progbar').style.width=Math.min(100,loaded/expected*100)+'%'; $('loadtxt').textContent=`Loading… ${(loaded/1048576).toFixed(0)} / ${(expected/1048576).toFixed(0)} MB`;};
+let bufs;
+try{ bufs=await Promise.all([...CL.cloud.map(c=>fetchBin(c.file,tick)), fetchBin(LITE.mesh.file,tick)]); }
+catch(e){ $('loadtxt').textContent='Could not load the map data. Reload the page to try again.'; throw e; }
+$('loadtxt').textContent='Building 3D scene…'; await new Promise(r=>setTimeout(r,30));
+const deq=(M,buf,n)=>{const qq=new Uint16Array(buf,0,n*3),p=new Float32Array(n*3);for(let i=0;i<n*3;i++)p[i]=M.lo[i%3]+qq[i]*M.sc[i%3];return p;};
+
+// ---------- scene ----------
+const r=new THREE.WebGLRenderer({antialias:false}); r.setPixelRatio(Math.min(devicePixelRatio,2)); r.setSize(innerWidth,innerHeight);
+document.body.prepend(r.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x0b0d10);
+const cam=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.02,500); cam.up.set(0,0,1);
+// Points drawn at their real-world spacing so surfaces look solid up close.
+const pmat=new THREE.ShaderMaterial({uniforms:{scale:{value:1},mul:{value:1.3}},
+  vertexShader:`attribute vec3 rgb; attribute float vs; uniform float scale; uniform float mul; varying vec3 vC;
+    void main(){ vec4 mv=modelViewMatrix*vec4(position,1.0); gl_Position=projectionMatrix*mv;
+      gl_PointSize=clamp(vs*0.001*mul*scale/max(-mv.z,0.02),1.0,40.0); vC=rgb; }`,
+  fragmentShader:`varying vec3 vC; void main(){ gl_FragColor=vec4(vC,1.0); }`});
+const updScale=()=>{pmat.uniforms.scale.value=r.domElement.height/(2*Math.tan(THREE.MathUtils.degToRad(cam.fov)/2));};
+const cloud=new THREE.Group(); scene.add(cloud); const bb=new THREE.Box3();
+CL.cloud.forEach((c,i)=>{const g=new THREE.BufferGeometry(), n=c.n, b=bufs[i];
+  g.setAttribute('position',new THREE.BufferAttribute(deq(CL,b,n),3));
+  g.setAttribute('rgb',new THREE.BufferAttribute(new Uint8Array(b,n*6,n*3),3,true));
+  g.setAttribute('vs',new THREE.BufferAttribute(CL.withSize?new Uint8Array(b,n*9,n):new Uint8Array(n).fill(12),1));
+  g.computeBoundingBox(); bb.union(g.boundingBox); const p=new THREE.Points(g,pmat); p.frustumCulled=false; cloud.add(p);});
+const mb=bufs[bufs.length-1], nv=LITE.mesh.nv, mg=new THREE.BufferGeometry();
+mg.setAttribute('position',new THREE.BufferAttribute(deq(LITE,mb,nv),3));
+mg.setAttribute('color',new THREE.BufferAttribute(new Uint8Array(mb,nv*6,nv*3),3,true));
+mg.setIndex(new THREE.BufferAttribute(new Uint32Array(mb.slice(nv*9)),1)); mg.computeVertexNormals();
+const mesh=new THREE.Mesh(mg,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide})); scene.add(mesh);
+scene.add(new THREE.HemisphereLight(0xffffff,0x888888,1.6)); const dl=new THREE.DirectionalLight(0xffffff,.8); dl.position.set(1,2,5); scene.add(dl);
+const ctl=new OrbitControls(cam,r.domElement); ctl.enableDamping=true;
+const ctr=bb.getCenter(new THREE.Vector3()), sz=bb.getSize(new THREE.Vector3());
+$('sub').textContent=`23 Jul 2026 · ${(CL.cloud.reduce((s,c)=>s+c.n,0)/1e6).toFixed(1)} M points`;
+$('start').hidden=true; $('start').style.display='none'; $('panel').hidden=false;
+
+// ---------- modes ----------
+let mode='fpv', yaw=0, pitch=0, locked=false, dragging=false, lx=0, ly=0;
+const touch=matchMedia('(pointer:coarse)').matches;
+const P=LITE.poses; $('pose').max=P.length-1;
+const eyeZ=()=>LITE.floor + +$('h').value;
+function startPose(){const i=+$('pose').value,p=P[i],n=P[Math.min(i+3,P.length-1)]; yaw=Math.atan2(n[1]-p[1],n[0]-p[0])||0; pitch=0; cam.position.set(p[0],p[1],eyeZ());}
+function applyLook(){cam.lookAt(cam.position.clone().add(new THREE.Vector3(Math.cos(pitch)*Math.cos(yaw),Math.cos(pitch)*Math.sin(yaw),Math.sin(pitch))));}
+function hint(){ $('hint').textContent = mode=='fpv' && !locked ? (touch?'Drag to look · arrow pad to walk':'Click the view to walk with the mouse · or drag to look') : ''; }
+function setMode(m){
+  mode=m; document.querySelectorAll('[data-m]').forEach(b=>b.classList.toggle('on',b.dataset.m==m));
+  $('cross').hidden=m!='fpv'; $('pad').hidden=!(touch&&m=='fpv'); ctl.enabled=m!='fpv';
+  if(m!='fpv') document.exitPointerLock?.();
+  if(m=='fpv'){ startPose(); applyLook(); }
+  else if(m=='360'){ startPose(); ctl.target.copy(cam.position).add(new THREE.Vector3(Math.cos(yaw),Math.sin(yaw),0).multiplyScalar(.01));
+    Object.assign(ctl,{rotateSpeed:-0.35,enableZoom:false,enablePan:false,minDistance:.01,maxDistance:.01}); ctl.update(); }
+  else { Object.assign(ctl,{rotateSpeed:1,enableZoom:true,enablePan:true,minDistance:.1,maxDistance:500});
+    ctl.target.copy(ctr); const L=sz.length(); cam.position.set(ctr.x-L*.45,ctr.y-L*.45,ctr.z+L*.55); ctl.update(); }
+  hint();
+}
+function setShow(s){cloud.visible=s!='mesh'; mesh.visible=s!='cloud'; document.querySelectorAll('[data-s]').forEach(b=>b.classList.toggle('on',b.dataset.s==s));}
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>setShow(b.dataset.s));
+function labels(){$('pl').textContent=`node ${P[+$('pose').value][3]}`; $('hl').textContent=(+$('h').value).toFixed(2)+' m';
+  $('sl').textContent=(+$('size').value).toFixed(1)+'×'; $('vl').textContent=$('v').value+' m/s'; $('fl').textContent=$('fov').value+'°';}
+$('pose').oninput=()=>{labels(); setMode(mode=='orbit'?'fpv':mode);};
+$('h').oninput=()=>{labels(); if(mode!='orbit'){cam.position.z=eyeZ(); if(mode=='360'){ctl.target.z=cam.position.z;ctl.update();}}};
+$('size').oninput=()=>{pmat.uniforms.mul.value=+$('size').value;labels();}; $('v').oninput=labels;
+$('fov').oninput=()=>{cam.fov=+$('fov').value;cam.updateProjectionMatrix();updScale();labels();};
+let dark=true; $('bg').onclick=()=>{dark=!dark;scene.background.set(dark?0x0b0d10:0xffffff);$('bg').textContent=dark?'White background':'Dark background';};
+$('min').onclick=()=>{const m=$('panel').classList.toggle('min');$('min').textContent=m?'+':'–';};
+
+// ---------- FPV input ----------
+const look=(dx,dy,k)=>{yaw-=dx*k;pitch=Math.max(-1.5,Math.min(1.5,pitch-dy*k));};
+r.domElement.addEventListener('click',()=>{ if(mode=='fpv'&&!touch&&!locked){ try{ r.domElement.requestPointerLock?.()?.catch?.(()=>{}); }catch(e){} } });
+document.addEventListener('pointerlockchange',()=>{locked=document.pointerLockElement===r.domElement;hint();});
+document.addEventListener('mousemove',e=>{ if(locked&&mode=='fpv') look(e.movementX,e.movementY,.0022); });
+r.domElement.addEventListener('pointerdown',e=>{ if(mode=='fpv'&&!locked){dragging=true;lx=e.clientX;ly=e.clientY;r.domElement.setPointerCapture(e.pointerId);} });
+r.domElement.addEventListener('pointermove',e=>{ if(dragging){look(lx-e.clientX,ly-e.clientY,-.004);lx=e.clientX;ly=e.clientY;} });
+r.domElement.addEventListener('pointerup',()=>dragging=false); r.domElement.addEventListener('pointercancel',()=>dragging=false);
+const keys={};
+addEventListener('keydown',e=>{ if(e.target.tagName=='INPUT'&&e.code.startsWith('Arrow'))return; keys[e.code]=1; if(e.code=='KeyH')$('panel').hidden=!$('panel').hidden; if(e.code=='Space'&&mode=='fpv')e.preventDefault(); });
+addEventListener('keyup',e=>keys[e.code]=0); addEventListener('blur',()=>{for(const k in keys)keys[k]=0;});
+document.querySelectorAll('#pad [data-k]').forEach(b=>{const k=b.dataset.k;
+  b.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=1;}); ['pointerup','pointerleave','pointercancel'].forEach(t=>b.addEventListener(t,()=>keys[k]=0));});
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();r.setSize(innerWidth,innerHeight);updScale();});
+
+const clock=new THREE.Clock();
+r.setAnimationLoop(()=>{const dt=Math.min(clock.getDelta(),.1);
+  if(mode=='fpv'){const f=new THREE.Vector3(Math.cos(yaw),Math.sin(yaw),0), s=new THREE.Vector3(Math.sin(yaw),-Math.cos(yaw),0), m=new THREE.Vector3();
+    if(keys.KeyW||keys.ArrowUp)m.add(f); if(keys.KeyS||keys.ArrowDown)m.sub(f); if(keys.KeyD||keys.ArrowRight)m.add(s); if(keys.KeyA||keys.ArrowLeft)m.sub(s);
+    if(keys.Space||keys.KeyE)m.z+=1; if(keys.KeyC||keys.KeyQ)m.z-=1;
+    if(m.lengthSq()){m.normalize().multiplyScalar(+$('v').value*(keys.ShiftLeft||keys.ShiftRight?2.5:1)*dt);cam.position.add(m);}
+    applyLook();}
+  else ctl.update();
+  r.render(scene,cam);});
+updScale(); labels(); setShow('cloud'); setMode('fpv');
+</script>
+</body></html>
